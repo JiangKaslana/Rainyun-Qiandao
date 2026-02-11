@@ -109,11 +109,9 @@ def get_height_from_style(style):
     return re.search(r'height:\s*([\d.]+)px', style).group(1)
 
 
-def process_captcha():
-    global wait, driver
-    
+def process_captcha(driver, wait):
     try:
-        download_captcha_img()
+        download_captcha_img(driver, wait)
         logger.info("开始识别验证码")
         captcha = cv2.imread("temp/captcha.jpg")
         result = ICR.main("temp/captcha.jpg", "temp/sprite.jpg")
@@ -143,14 +141,12 @@ def process_captcha():
         time.sleep(5)
         reload.click()
         time.sleep(5)
-        process_captcha()
+        process_captcha(driver, wait)
     except TimeoutException:
         logger.error("获取验证码图片失败")
 
 
-def download_captcha_img():
-    global wait
-    
+def download_captcha_img(driver, wait):
     if os.path.exists("temp"):
         for filename in os.listdir("temp"):
             file_path = os.path.join("temp", filename)
@@ -207,7 +203,7 @@ def sign_in_account(user, pwd, debug=False, headless=False):
             wait.until(EC.visibility_of_element_located((By.ID, 'tcaptcha_iframe_dy')))
             logger.warning("触发验证码！")
             driver.switch_to.frame("tcaptcha_iframe_dy")
-            process_captcha()
+            process_captcha(driver, wait)
         except TimeoutException:
             logger.info("未触发验证码")
         
@@ -268,7 +264,7 @@ def sign_in_account(user, pwd, debug=False, headless=False):
                             )
                             wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "tcaptcha_iframe_dy")))
                             logger.info("处理验证码")
-                            process_captcha()
+                            process_captcha(driver, wait)
                             driver.switch_to.default_content()
                         except TimeoutException:
                             logger.info("未触发验证码，继续")

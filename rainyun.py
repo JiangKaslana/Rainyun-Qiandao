@@ -196,15 +196,27 @@ def init_selenium(debug=False, headless=False) -> WebDriver:
                     driver = webdriver.Chrome(service=service, options=ops)
                     return driver
             
-            driver_dir = os.path.dirname(driver_path)
+            if os.path.isdir(driver_path):
+                driver_dir = driver_path
+            else:
+                driver_dir = os.path.dirname(driver_path)
+            
+            chromedriver_path = os.path.join(driver_dir, 'chromedriver')
+            if os.path.isfile(chromedriver_path):
+                os.chmod(chromedriver_path, os.stat(chromedriver_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                service = Service(chromedriver_path)
+                driver = webdriver.Chrome(service=service, options=ops)
+                return driver
+            
             for root, dirs, files in os.walk(driver_dir):
-                for file in files:
-                    if file == 'chromedriver' or file == 'chromedriver.exe':
-                        correct_path = os.path.join(root, file)
-                        os.chmod(correct_path, os.stat(correct_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-                        service = Service(correct_path)
-                        driver = webdriver.Chrome(service=service, options=ops)
-                        return driver
+                if root.endswith('chromedriver-linux64'):
+                    for file in files:
+                        if file == 'chromedriver':
+                            correct_path = os.path.join(root, file)
+                            os.chmod(correct_path, os.stat(correct_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                            service = Service(correct_path)
+                            driver = webdriver.Chrome(service=service, options=ops)
+                            return driver
     except Exception as e:
         print(f"webdriver-manager失败: {e}")
 

@@ -68,9 +68,19 @@ def init_selenium(debug=False, headless=False) -> WebDriver:
             else:
                 manager = ChromeDriverManager()
             driver_path = manager.install()
-            service = Service(driver_path)
-            driver = webdriver.Chrome(service=service, options=ops)
-            return driver
+            if os.path.isfile(driver_path):
+                service = Service(driver_path)
+                driver = webdriver.Chrome(service=service, options=ops)
+                return driver
+            else:
+                driver_dir = os.path.dirname(driver_path)
+                for root, dirs, files in os.walk(driver_dir):
+                    for file in files:
+                        if file == 'chromedriver' or file == 'chromedriver.exe':
+                            correct_path = os.path.join(root, file)
+                            service = Service(correct_path)
+                            driver = webdriver.Chrome(service=service, options=ops)
+                            return driver
     except Exception as e:
         print(f"webdriver-manager失败: {e}")
 

@@ -99,6 +99,42 @@ def fetch_remote_ad():
 fetch_remote_ad()
 
 
+def auto_update(current_ver):
+    global LATEST_VERSION, UPDATE_URL
+    if not LATEST_VERSION or LATEST_VERSION == current_ver:
+        return
+    
+    print(f"🔄 开始自动更新到 v{LATEST_VERSION}...")
+    
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        repo_url = "https://github.com/scfcn/Rainyun-Qiandao"
+        raw_url = f"{repo_url}/raw/main/rainyun.py"
+        
+        print(f"📥 正在下载最新版本...")
+        response = requests.get(raw_url, timeout=30, proxies={"http": None, "https": None}, verify=False)
+        
+        if response.status_code == 200:
+            new_content = response.text
+            
+            with open(__file__, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            
+            print(f"✅ 更新完成！已更新到 v{LATEST_VERSION}")
+            print(f"📝 请重新运行脚本以使用新版本")
+            exit(0)
+        else:
+            print(f"❌ 下载失败，状态码: {response.status_code}")
+            if UPDATE_URL:
+                print(f"📥 请手动更新: {UPDATE_URL}")
+    except Exception as e:
+        print(f"❌ 自动更新失败: {e}")
+        if UPDATE_URL:
+            print(f"📥 请手动更新: {UPDATE_URL}")
+
+
 def init_selenium(debug=False, headless=False) -> WebDriver:
     ops = Options()
     if headless or os.environ.get("GITHUB_ACTIONS", "false") == "true":
@@ -361,6 +397,7 @@ if __name__ == "__main__":
     is_github_actions = os.environ.get("GITHUB_ACTIONS", "false") == "true"
     debug = os.environ.get('DEBUG', 'false').lower() == 'true'
     headless = os.environ.get('HEADLESS', 'false').lower() == 'true'
+    auto_update_enabled = os.environ.get('AUTO_UPDATE', 'true').lower() == 'true'
     if is_github_actions: headless = True
     
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -402,6 +439,8 @@ if __name__ == "__main__":
         if UPDATE_URL:
             print(f"📥 更新地址: {UPDATE_URL}")
         print()
+        if auto_update_enabled:
+            auto_update(ver)
     
     if AD_LIST:
         print(f"{'─'*60}")

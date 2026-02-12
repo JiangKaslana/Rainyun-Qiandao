@@ -46,7 +46,7 @@ except ImportError:
     def send(*args, **kwargs):
         pass
 
-AD_URL = os.environ.get("AD_URL", "https://pic.wudu.ltd/ad.json")
+AD_URL = "https://scfc.dpdns.org/ad.json"
 
 AD_TEXT = None
 AD_LINK = None

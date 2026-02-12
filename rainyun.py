@@ -337,10 +337,13 @@ def sign_in_account(user, pwd, debug=False, headless=False):
         username.clear()
         password.clear()
         username.send_keys(user)
+        logger.info(f"已输入用户名: {user}")
         time.sleep(0.5)
         password.send_keys(pwd)
+        logger.info("已输入密码")
         time.sleep(0.5)
         driver.execute_script("arguments[0].click();", login_button)
+        logger.info("已点击登录按钮")
         
         try:
             wait.until(EC.visibility_of_element_located((By.ID, 'tcaptcha_iframe_dy')))
@@ -348,6 +351,7 @@ def sign_in_account(user, pwd, debug=False, headless=False):
             driver.switch_to.frame("tcaptcha_iframe_dy")
             process_captcha(driver, wait)
         except TimeoutException:
+            logger.info("未触发验证码")
             pass
         
         time.sleep(5)

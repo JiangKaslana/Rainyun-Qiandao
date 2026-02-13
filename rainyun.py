@@ -53,7 +53,10 @@ def init_selenium(debug=False, headless=False) -> WebDriver:
         for option in ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
                        '--disable-extensions', '--disable-software-rasterizer',
                        '--remote-debugging-port=9222', '--disable-background-timer-throttling',
-                       '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding']:
+                       '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding',
+                       '--disable-features=VizDisplayCompositor',
+                       '--disable-ipc-flooding-protection',
+                       '--disable-default-apps']:
             ops.add_argument(option)
     ops.add_argument('--window-size=1920,1080')
     ops.add_argument('--disable-blink-features=AutomationControlled')
@@ -71,7 +74,7 @@ def init_selenium(debug=False, headless=False) -> WebDriver:
             else:
                 manager = ChromeDriverManager()
             driver_path = manager.install()
-            if os.path.isfile(driver_path):
+            if os.path.isfile(driver_path) and os.access(driver_path, os.X_OK):
                 service = Service(driver_path)
                 driver = webdriver.Chrome(service=service, options=ops)
                 return driver
@@ -79,11 +82,12 @@ def init_selenium(debug=False, headless=False) -> WebDriver:
                 driver_dir = os.path.dirname(driver_path)
                 for root, dirs, files in os.walk(driver_dir):
                     for file in files:
-                        if file == 'chromedriver' or file == 'chromedriver.exe':
+                        if file in ['chromedriver', 'chromedriver.exe']:
                             correct_path = os.path.join(root, file)
-                            service = Service(correct_path)
-                            driver = webdriver.Chrome(service=service, options=ops)
-                            return driver
+                            if os.access(correct_path, os.X_OK):
+                                service = Service(correct_path)
+                                driver = webdriver.Chrome(service=service, options=ops)
+                                return driver
     except Exception as e:
         print(f"webdriver-manager失败: {e}")
 
@@ -177,7 +181,7 @@ def download_captcha_img(driver, wait):
 
 
 def sign_in_account(user, pwd, debug=False, headless=False):
-    timeout = 15
+    timeout = 30
     driver = None
     
     try:
@@ -195,9 +199,18 @@ def sign_in_account(user, pwd, debug=False, headless=False):
         
         logger.info("发起登录请求")
         driver.get("https://app.rainyun.com/auth/login")
+        logger.info(f"当前页面URL: {driver.current_url}")
+        logger.info(f"页面标题: {driver.title}")
         wait = WebDriverWait(driver, timeout)
         
-        username = wait.until(EC.visibility_of_element_located((By.NAME, 'login-field')))
+        try:
+            username = wait.until(EC.visibility_of_element_located((By.NAME, 'login-field')))
+            logger.info("找到用户名输入框")
+        except TimeoutException:
+            logger.error("未找到用户名输入框，页面可能未正确加载")
+            logger.info(f"页面源码长度: {len(driver.page_source)}")
+            raise
+        
         password = wait.until(EC.visibility_of_element_located((By.NAME, 'login-password')))
         try:
             login_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app"]/div[1]/div[1]/div/div[2]/fade/div/div/span/form/button')))

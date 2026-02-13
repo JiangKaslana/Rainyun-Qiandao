@@ -32,6 +32,9 @@ jobs:
       # 移除Chrome浏览器缓存，因为缓存系统目录可能导致权限问题
       # 使用webdriver-manager自动管理ChromeDriver，无需缓存
       
+      - name: 清理webdriver-manager缓存
+        run: rm -rf /home/runner/.wdm || true
+      
       - name: 安装Chrome和ChromeDriver
         run: |
           sudo apt-get update

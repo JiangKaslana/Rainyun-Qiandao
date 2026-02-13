@@ -2,7 +2,6 @@ import logging
 import os
 import random
 import re
-import stat
 import time
 
 import cv2
@@ -47,124 +46,6 @@ except ImportError:
     def send(*args, **kwargs):
         pass
 
-AD_URL = os.environ.get("AD_URL", "https://scfc.dpdns.org/ad.json")
-
-AD_TEXT = None
-AD_LINK = None
-AD_ENABLED = True
-AD_LIST = None
-MIN_VERSION = None
-LATEST_VERSION = None
-UPDATE_URL = None
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-def fetch_remote_ad():
-    global AD_TEXT, AD_LINK, AD_ENABLED, AD_LIST, MIN_VERSION, LATEST_VERSION, UPDATE_URL
-    if not AD_URL:
-        return
-    try:
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        response = requests.get(AD_URL, timeout=5, proxies={"http": None, "https": None}, verify=False)
-        if response.status_code == 200:
-            import json
-            ad_data = json.loads(response.text)
-            
-            if "enabled" in ad_data:
-                AD_ENABLED = ad_data["enabled"]
-            
-            if "min_version" in ad_data:
-                MIN_VERSION = ad_data["min_version"]
-            
-            if "latest_version" in ad_data:
-                LATEST_VERSION = ad_data["latest_version"]
-            
-            if "update_url" in ad_data:
-                UPDATE_URL = ad_data["update_url"].strip().strip('`').strip("'").strip('"')
-            
-            if "ads" in ad_data and isinstance(ad_data["ads"], list):
-                AD_LIST = ad_data["ads"]
-            else:
-                if "text" in ad_data:
-                    AD_TEXT = ad_data["text"]
-                if "link" in ad_data:
-                    AD_LINK = ad_data["link"]
-        else:
-            print(f"⚠️ 远程获取失败，状态码: {response.status_code}")
-    except Exception as e:
-        print(f"⚠️ 远程获取异常: {e}")
-
-
-fetch_remote_ad()
-
-
-def auto_update(current_ver):
-    global LATEST_VERSION, UPDATE_URL
-    if not LATEST_VERSION or LATEST_VERSION == current_ver:
-        return
-    
-    print(f"🔄 开始自动更新到 v{LATEST_VERSION}...")
-    
-    try:
-        import subprocess
-        import shutil
-        
-        git_path = shutil.which('git')
-        if not git_path:
-            print("⚠️ 未找到 git，尝试直接下载...")
-            download_update()
-            return
-        
-        print(f"📥 正在使用 git 同步最新版本...")
-        
-        subprocess.run(['git', 'fetch', '--all'], check=True, capture_output=True, text=True)
-        subprocess.run(['git', 'reset', '--hard', 'origin/main'], check=True, capture_output=True, text=True)
-        
-        print(f"✅ 更新完成！已同步到 v{LATEST_VERSION}")
-        print(f"📝 请重新运行脚本以使用新版本")
-        exit(0)
-    except subprocess.CalledProcessError as e:
-        print(f"❌ git 同步失败: {e}")
-        print(f"📥 尝试直接下载...")
-        download_update()
-    except Exception as e:
-        print(f"❌ 自动更新失败: {e}")
-        if UPDATE_URL:
-            print(f"📥 请手动更新: {UPDATE_URL}")
-
-
-def download_update():
-    global LATEST_VERSION, UPDATE_URL
-    try:
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        
-        repo_url = "https://github.com/scfcn/Rainyun-Qiandao"
-        raw_url = f"{repo_url}/raw/main/rainyun.py"
-        
-        print(f"📥 正在下载最新版本...")
-        response = requests.get(raw_url, timeout=30, proxies={"http": None, "https": None}, verify=False)
-        
-        if response.status_code == 200:
-            new_content = response.text
-            
-            with open(__file__, 'w', encoding='utf-8') as f:
-                f.write(new_content)
-            
-            print(f"✅ 更新完成！已更新到 v{LATEST_VERSION}")
-            print(f"📝 请重新运行脚本以使用新版本")
-            exit(0)
-        else:
-            print(f"❌ 下载失败，状态码: {response.status_code}")
-            if UPDATE_URL:
-                print(f"📥 请手动更新: {UPDATE_URL}")
-    except Exception as e:
-        print(f"❌ 下载失败: {e}")
-        if UPDATE_URL:
-            print(f"📥 请手动更新: {UPDATE_URL}")
-
 
 def init_selenium(debug=False, headless=False) -> WebDriver:
     ops = Options()
@@ -187,33 +68,16 @@ def init_selenium(debug=False, headless=False) -> WebDriver:
             else:
                 manager = ChromeDriverManager()
             driver_path = manager.install()
-            
             if os.path.isfile(driver_path):
-                filename = os.path.basename(driver_path)
-                if 'chromedriver' in filename.lower() and 'THIRD_PARTY_NOTICES' not in filename:
-                    os.chmod(driver_path, os.stat(driver_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-                    service = Service(driver_path)
-                    driver = webdriver.Chrome(service=service, options=ops)
-                    return driver
-            
-            if os.path.isdir(driver_path):
-                driver_dir = driver_path
-            else:
-                driver_dir = os.path.dirname(driver_path)
-            
-            chromedriver_path = os.path.join(driver_dir, 'chromedriver')
-            if os.path.isfile(chromedriver_path):
-                os.chmod(chromedriver_path, os.stat(chromedriver_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-                service = Service(chromedriver_path)
+                service = Service(driver_path)
                 driver = webdriver.Chrome(service=service, options=ops)
                 return driver
-            
-            for root, dirs, files in os.walk(driver_dir):
-                if root.endswith('chromedriver-linux64'):
+            else:
+                driver_dir = os.path.dirname(driver_path)
+                for root, dirs, files in os.walk(driver_dir):
                     for file in files:
-                        if file == 'chromedriver':
+                        if file == 'chromedriver' or file == 'chromedriver.exe':
                             correct_path = os.path.join(root, file)
-                            os.chmod(correct_path, os.stat(correct_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
                             service = Service(correct_path)
                             driver = webdriver.Chrome(service=service, options=ops)
                             return driver
@@ -314,9 +178,11 @@ def sign_in_account(user, pwd, debug=False, headless=False):
     driver = None
     
     try:
+        logger.info(f"开始处理账户: {user}")
         if not debug:
             time.sleep(random.randint(5, 10))
         
+        logger.info("初始化 Selenium")
         driver = init_selenium(debug=debug, headless=headless)
         
         try:
@@ -324,6 +190,7 @@ def sign_in_account(user, pwd, debug=False, headless=False):
             driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": js})
         except: pass
         
+        logger.info("发起登录请求")
         driver.get("https://app.rainyun.com/auth/login")
         wait = WebDriverWait(driver, timeout)
         
@@ -344,17 +211,18 @@ def sign_in_account(user, pwd, debug=False, headless=False):
         
         try:
             wait.until(EC.visibility_of_element_located((By.ID, 'tcaptcha_iframe_dy')))
-            logger.warning("触发验证码")
+            logger.warning("触发验证码！")
             driver.switch_to.frame("tcaptcha_iframe_dy")
             process_captcha(driver, wait)
         except TimeoutException:
-            pass
+            logger.info("未触发验证码")
         
         time.sleep(5)
         driver.switch_to.default_content()
         
-        if "dashboard" in driver.current_url or ("app.rainyun.com" in driver.current_url and "login" not in driver.current_url):
-            logger.info("登录成功")
+        if "dashboard" in driver.current_url:
+            logger.info("登录成功！")
+            logger.info("正在转到赚取积分页")
             
             for _ in range(3):
                 try:
@@ -365,11 +233,11 @@ def sign_in_account(user, pwd, debug=False, headless=False):
                     try:
                         claim_btns = driver.find_elements(By.XPATH, "//span[contains(text(),'每日签到')]/following::a[contains(@href,'/account/reward/earn')][1]")
                         if any(el.is_displayed() for el in claim_btns):
-                            logger.info("开始签到")
+                            logger.info("检测到'每日签到'行的'领取奖励'，进入签到流程")
                         else:
                             completed = driver.find_elements(By.XPATH, "//span[contains(text(),'每日签到')]/following::span[contains(text(),'已完成')][1]")
                             if any(el.is_displayed() for el in completed):
-                                logger.info("今日已签到")
+                                logger.info("'每日签到'显示已完成，跳过当前账号")
                                 try:
                                     points_raw = driver.find_element(By.XPATH, '//*[@id="app"]/div[1]/div[3]/div[2]/div/div/div[2]/div[1]/div[1]/div/p/div/h3').get_attribute("textContent")
                                     current_points = int(''.join(re.findall(r'\d+', points_raw)))
@@ -395,22 +263,27 @@ def sign_in_account(user, pwd, debug=False, headless=False):
                     if earn:
                         driver.execute_script("arguments[0].scrollIntoView(true);", earn)
                         time.sleep(1)
+                        logger.info("点击赚取积分")
                         driver.execute_script("arguments[0].click();", earn)
+                        
+                        logger.info("等待验证码加载（如果有）...")
                         
                         try:
                             WebDriverWait(driver, 15, poll_frequency=0.25).until(
                                 EC.visibility_of_element_located((By.ID, "tcaptcha_iframe_dy"))
                             )
                             wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "tcaptcha_iframe_dy")))
+                            logger.info("处理验证码")
                             process_captcha(driver, wait)
                             driver.switch_to.default_content()
                         except TimeoutException:
+                            logger.info("未触发验证码，继续")
                             driver.switch_to.default_content()
                         except Exception as e:
-                            logger.error(f"验证码错误: {e}")
+                            logger.error(f"验证码处理过程出错: {e}")
                             driver.switch_to.default_content()
                         
-                        logger.info("签到完成")
+                        logger.info("赚取积分操作完成")
                         break
                     else:
                         driver.refresh()
@@ -423,13 +296,13 @@ def sign_in_account(user, pwd, debug=False, headless=False):
             try:
                 points_raw = driver.find_element(By.XPATH, '//*[@id="app"]/div[1]/div[3]/div[2]/div/div/div[2]/div[1]/div[1]/div/p/div/h3').get_attribute("textContent")
                 current_points = int(''.join(re.findall(r'\d+', points_raw)))
-                logger.info(f"积分: {current_points} ({current_points / 2000:.2f}元)")
+                logger.info(f"当前剩余积分: {current_points} | 约为 {current_points / 2000:.2f} 元")
             except:
                 current_points = 0
                 
+            logger.info("任务执行成功！")
             return True, user, current_points, None
         else:
-            logger.error("登录失败")
             return False, user, 0, "登录失败"
 
     except Exception as e:
@@ -445,65 +318,15 @@ if __name__ == "__main__":
     is_github_actions = os.environ.get("GITHUB_ACTIONS", "false") == "true"
     debug = os.environ.get('DEBUG', 'false').lower() == 'true'
     headless = os.environ.get('HEADLESS', 'false').lower() == 'true'
-    auto_update_enabled = os.environ.get('AUTO_UPDATE', 'true').lower() == 'true'
     if is_github_actions: headless = True
     
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
     
-    ver = "2.4"
-    print(f"\n{'='*60}")
-    print(f"  🌧️  雨云自动签到工作流 v{ver}")
-    print(f"{'='*60}\n")
-    
-    if not AD_ENABLED:
-        print("⚠️  脚本已被远程禁用，请检查配置或联系管理员")
-        exit(1)
-    
-    if MIN_VERSION:
-        try:
-            from packaging import version
-            current_ver = version.parse(ver)
-            min_ver = version.parse(MIN_VERSION)
-            if current_ver < min_ver:
-                print(f"❌ 脚本版本过低！当前: {ver}, 最低要求: {MIN_VERSION}")
-                if UPDATE_URL:
-                    print(f"📥 更新地址: {UPDATE_URL}")
-                exit(1)
-        except ImportError:
-            try:
-                current_parts = [int(x) for x in ver.split('.')]
-                min_parts = [int(x) for x in MIN_VERSION.split('.')]
-                if current_parts < min_parts:
-                    print(f"❌ 脚本版本过低！当前: {ver}, 最低要求: {MIN_VERSION}")
-                    if UPDATE_URL:
-                        print(f"📥 更新地址: {UPDATE_URL}")
-                    exit(1)
-            except Exception:
-                pass
-    
-    if LATEST_VERSION and LATEST_VERSION != ver:
-        print(f"📌 发现新版本: {LATEST_VERSION} (当前: {ver})")
-        if UPDATE_URL:
-            print(f"📥 更新地址: {UPDATE_URL}")
-        print()
-        if auto_update_enabled:
-            auto_update(ver)
-    
-    if AD_LIST:
-        print(f"{'─'*60}")
-        for ad in AD_LIST:
-            print(f"📢 {ad.get('text', '')}")
-            link = ad.get('link')
-            if link and link != 'null':
-                print(f"🔗 {link}")
-        print(f"{'─'*60}\n")
-    elif AD_TEXT:
-        print(f"{'─'*60}")
-        print(f"📢 {AD_TEXT}")
-        if AD_LINK:
-            print(f"🔗 {AD_LINK}")
-        print(f"{'─'*60}\n")
+    ver = "2.3"
+    logger.info("------------------------------------------------------------------")
+    logger.info(f"雨云自动签到工作流 v{ver}")
+    logger.info("------------------------------------------------------------------")
     
     accounts = []
     users_env = os.environ.get("RAINYUN_USER", "")
@@ -515,27 +338,18 @@ if __name__ == "__main__":
         for user, pwd in zip(users, passwords):
             accounts.append((user, pwd))
     else:
-        print("❌ 未找到有效账户配置或数量不匹配")
+        logger.error("未找到有效账户配置或数量不匹配")
         exit(1)
     
     results = []
     for i, (user, pwd) in enumerate(accounts, 1):
-        print(f"\n{'─'*60}")
-        print(f"📋 处理账户 {i}/{len(accounts)}: {user}")
-        print(f"{'─'*60}")
+        logger.info(f"\n=== 开始处理第 {i} 个账户: {user} ===")
         result = sign_in_account(user, pwd, debug=debug, headless=headless)
         results.append(result)
-        if result[0]:
-            print(f"✅ 账户 {i} 处理完成")
-        else:
-            print(f"❌ 账户 {i} 处理失败")
+        logger.info(f"=== 第 {i} 个账户处理完成 ===\n")
     
     success_count = sum(1 for r in results if r[0])
     total_count = len(results)
-    
-    print(f"\n{'='*60}")
-    print(f"📊 签到完成！成功: {success_count}/{total_count}")
-    print(f"{'='*60}\n")
     
     if success_count == total_count:
         notification_title = f"✅ 雨云自动签到完成 - 全部成功"
@@ -552,40 +366,8 @@ if __name__ == "__main__":
         else:
             notification_content += f"{i}. ❌ {user}\n   错误: {error_msg}\n"
     
-    if AD_LIST:
-        notification_content += "\n" + "=" * 30 + "\n"
-        for ad in AD_LIST:
-            link = ad.get('link')
-            if link and link != 'null':
-                notification_content += f"📢 {ad.get('text', '')}\n🔗 {link}\n"
-            else:
-                notification_content += f"📢 {ad.get('text', '')}\n"
-        notification_content += "=" * 30 + "\n"
-    elif AD_TEXT:
-        notification_content += "\n" + "=" * 30 + "\n"
-        if AD_LINK:
-            notification_content += f"📢 广告: {AD_TEXT}\n🔗 链接: {AD_LINK}\n"
-        else:
-            notification_content += f"📢 广告: {AD_TEXT}\n"
-        notification_content += "=" * 30 + "\n"
-    
     try:
         send(notification_title, notification_content)
-        print("✅ 统一通知发送成功")
+        logger.info("统一通知发送成功")
     except Exception as e:
-        print("❌ 发送通知失败")
-    
-    if AD_LIST:
-        print(f"\n{'─'*60}")
-        for ad in AD_LIST:
-            print(f"📢 {ad.get('text', '')}")
-            link = ad.get('link')
-            if link and link != 'null':
-                print(f"🔗 {link}")
-        print(f"{'─'*60}\n")
-    elif AD_TEXT:
-        print(f"\n{'─'*60}")
-        print(f"📢 {AD_TEXT}")
-        if AD_LINK:
-            print(f"🔗 {AD_LINK}")
-        print(f"{'─'*60}\n")
+        logger.error(f"发送通知失败: {e}")

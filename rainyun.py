@@ -201,7 +201,26 @@ def sign_in_account(user, pwd, debug=False, headless=False):
         driver.get("https://app.rainyun.com/auth/login")
         logger.info(f"当前页面URL: {driver.current_url}")
         logger.info(f"页面标题: {driver.title}")
+        
+        time.sleep(5)
+        
         wait = WebDriverWait(driver, timeout)
+        
+        try:
+            WebDriverWait(driver, 15).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            logger.info("页面加载完成")
+        except:
+            logger.warning("页面加载超时，继续尝试查找元素")
+        
+        try:
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script("return typeof Vue !== 'undefined'") or len(d.find_elements(By.TAG_NAME, "input")) > 0
+            )
+            logger.info("JavaScript 框架已加载或找到输入元素")
+        except:
+            logger.warning("等待 JavaScript 框架超时")
         
         try:
             username = wait.until(EC.visibility_of_element_located((By.NAME, 'login-field')))
@@ -209,7 +228,23 @@ def sign_in_account(user, pwd, debug=False, headless=False):
         except TimeoutException:
             logger.error("未找到用户名输入框，页面可能未正确加载")
             logger.info(f"页面源码长度: {len(driver.page_source)}")
-            raise
+            
+            all_inputs = driver.find_elements(By.TAG_NAME, "input")
+            logger.info(f"页面中找到 {len(all_inputs)} 个 input 元素")
+            for i, inp in enumerate(all_inputs[:5]):
+                logger.info(f"  Input {i}: name={inp.get_attribute('name')}, type={inp.get_attribute('type')}, placeholder={inp.get_attribute('placeholder')}")
+            
+            logger.info("尝试其他选择器...")
+            
+            try:
+                username = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, 'input[type="text"]')))
+                logger.info("通过 CSS 选择器找到输入框")
+            except:
+                try:
+                    username = wait.until(EC.visibility_of_element_located((By.XPATH, '//input[contains(@placeholder, "账号") or contains(@placeholder, "用户名") or contains(@placeholder, "手机") or contains(@placeholder, "邮箱")]')))
+                    logger.info("通过 XPath 找到输入框")
+                except:
+                    raise TimeoutException("无法找到登录输入框")
         
         password = wait.until(EC.visibility_of_element_located((By.NAME, 'login-password')))
         try:

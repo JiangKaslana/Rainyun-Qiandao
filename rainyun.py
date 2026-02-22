@@ -176,25 +176,41 @@ def init_selenium(debug=False, headless=False, fingerprint=None):
     if debug and not is_github_actions:
         ops.add_experimental_option("detach", True)
     
-    try:
-        if ChromeDriverManager:
+    if is_github_actions:
+        try:
+            print("GitHub Actions环境：使用系统ChromeDriver")
+            driver = webdriver.Chrome(options=ops)
+            return driver
+        except Exception as e:
+            print(f"系统ChromeDriver失败: {e}")
+            raise Exception(f"GitHub Actions环境初始化Selenium失败: {e}")
+    
+    if ChromeDriverManager:
+        try:
+            print("尝试使用webdriver-manager...")
             if ChromeType and hasattr(ChromeType, 'GOOGLE'):
                 manager = ChromeDriverManager(chrome_type=ChromeType.GOOGLE)
             else:
                 manager = ChromeDriverManager()
             driver_path = manager.install()
-            service = Service(driver_path)
-            driver = webdriver.Chrome(service=service, options=ops)
-            return driver
-    except Exception as e:
-        print(f"webdriver-manager失败: {e}")
+            if os.path.isfile(driver_path) and not driver_path.endswith('.chromedriver'):
+                import stat
+                if not os.access(driver_path, os.X_OK):
+                    os.chmod(driver_path, os.stat(driver_path).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+                service = Service(driver_path)
+                driver = webdriver.Chrome(service=service, options=ops)
+                return driver
+            else:
+                print(f"webdriver-manager返回无效路径: {driver_path}")
+        except Exception as e:
+            print(f"webdriver-manager失败: {e}")
 
-    # 备用方案
     try:
+        print("尝试使用系统ChromeDriver...")
         driver = webdriver.Chrome(options=ops)
         return driver
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"系统ChromeDriver失败: {e}")
         
     raise Exception("无法初始化Selenium WebDriver")
 

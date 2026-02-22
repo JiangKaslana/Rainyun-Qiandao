@@ -36,8 +36,27 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable curl unzip
-          # 使用webdriver-manager自动管理ChromeDriver版本
-          pip install webdriver-manager chromedriver-binary-auto
+          
+          CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
+          echo "Chrome版本: $CHROME_VERSION"
+          
+          CHROMEDRIVER_VERSION=$(curl -sS https://googlechromelabs.github.io/chrome-for-testing/latest-versions-per-milestone.json | grep -oP "\"$CHROME_VERSION\".*?version\":\"\K[^\"]+" | head -1)
+          
+          if [ -z "$CHROMEDRIVER_VERSION" ]; then
+            CHROMEDRIVER_VERSION=$(curl -sS "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_VERSION" 2>/dev/null || echo "")
+          fi
+          
+          if [ -n "$CHROMEDRIVER_VERSION" ]; then
+            echo "下载ChromeDriver版本: $CHROMEDRIVER_VERSION"
+            curl -sS -o /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip" || \
+            curl -sS -o /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip"
+            unzip -o /tmp/chromedriver.zip -d /tmp/
+            sudo mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver 2>/dev/null || sudo mv /tmp/chromedriver /usr/local/bin/chromedriver
+            sudo chmod +x /usr/local/bin/chromedriver
+            echo "ChromeDriver安装完成: $(chromedriver --version)"
+          else
+            echo "无法获取ChromeDriver版本，将使用系统默认"
+          fi
       
       - name: 确保temp目录存在
         run: mkdir -p temp cookies

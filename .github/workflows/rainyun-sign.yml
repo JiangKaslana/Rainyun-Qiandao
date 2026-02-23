@@ -79,7 +79,7 @@ jobs:
         run: mkdir -p temp cookies
       
       - name: 恢复Cookie缓存
-        uses: actions/cache@v3
+        uses: actions/cache/restore@v3
         with:
           path: cookies
           key: rainyun-cookies-${{ secrets.RAINYUN_USER }}
@@ -134,10 +134,10 @@ jobs:
       
       - name: 保存Cookie缓存
         uses: actions/cache/save@v3
-        if: always()
+        if: always() && hashFiles('cookies') != ''
         with:
           path: cookies
-          key: rainyun-cookies-${{ secrets.RAINYUN_USER }}
+          key: rainyun-cookies-${{ secrets.RAINYUN_USER }}-${{ github.run_id }}
       
       - name: 清理临时文件
         run: rm -rf temp

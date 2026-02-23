@@ -314,6 +314,15 @@ def load_cookies(driver, user):
         logger.error(f"加载Cookie失败: {e}")
         return False
 
+def delete_cookie_cache(user):
+    try:
+        cookie_file = get_cookie_file_path(user)
+        if os.path.exists(cookie_file):
+            os.remove(cookie_file)
+            logger.info("已删除失效的Cookie缓存")
+    except Exception as e:
+        logger.error(f"删除Cookie缓存失败: {e}")
+
 def check_cookie_valid(driver):
     try:
         safe_get(driver, "https://app.rainyun.com/account/dashboard")
@@ -767,6 +776,7 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
                         logger.error(f"发现错误信息: {el.text}")
             except Exception as e:
                 logger.error(f"检查页面状态失败: {e}")
+            delete_cookie_cache(user)
             return False, user, 0, "登录超时"
         
         logger.info("登录成功！")
@@ -780,6 +790,7 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
             logger.info("赚取积分页面加载完成")
         except Exception as e:
             logger.error(f"跳转赚取积分页失败: {e}")
+            delete_cookie_cache(user)
             return False, user, 0, f"跳转失败: {e}"
 
         try:
@@ -856,6 +867,7 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
 
     except Exception as e:
         logger.error(f"异常: {str(e)}", exc_info=True)
+        delete_cookie_cache(user)
         return False, user, 0, str(e)
     finally:
         if driver:
@@ -926,22 +938,23 @@ if __name__ == "__main__":
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="Worker") as executor:
             future_to_account = {executor.submit(process_account, info): info for info in account_infos}
             
+            results_dict = {}
+            
             for future in as_completed(future_to_account):
                 account_info = future_to_account[future]
                 try:
                     index, result = future.result()
-                    results.append((index, result))
+                    results_dict[index] = result
                     if not result[0]:
                         failed_accounts.append(account_info)
                 except Exception as e:
                     logger.error(f"账户 {account_info[1]} 处理异常: {e}")
-                    results.append((account_info[0], (False, account_info[1], 0, str(e))))
+                    results_dict[account_info[0]] = (False, account_info[1], 0, str(e))
                     failed_accounts.append(account_info)
         
         current_retry += 1
     
-    results.sort(key=lambda x: x[0])
-    results = [result for _, result in results]
+    results = [results_dict.get(i, (False, accounts[i-1][0] if i <= len(accounts) else "", 0, "未处理")) for i in range(1, len(accounts) + 1)]
     
     logger.info("\n所有账户处理完成，生成统一通知...")
     

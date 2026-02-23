@@ -602,8 +602,9 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
                 except Exception as e:
                     logger.error(f"Cookie登录后操作出错: {e}")
                     pass
-            else:
-                logger.info("Cookie已失效，尝试重新登录")
+        
+        if not check_cookie_valid(driver):
+            logger.info("Cookie已失效，尝试重新登录")
             
             logger.info("发起登录请求")
             safe_get(driver, "https://app.rainyun.com/auth/login")
@@ -623,25 +624,31 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
                 logger.warning(f"获取页面信息失败: {e}")
             
             logger.info("等待登录表单加载...")
+        else:
+            logger.info("Cookie登录成功！")
+            logger.info("正在转到赚取积分页")
+            wait = WebDriverWait(driver, timeout)
             
-            username = None
-            password = None
-            
-            username_selectors = [
-                (By.NAME, 'login-field'),
-                (By.CSS_SELECTOR, 'input[name="login-field"]'),
-                (By.CSS_SELECTOR, 'input[type="text"]'),
-                (By.CSS_SELECTOR, 'input[placeholder*="用户"]'),
-                (By.CSS_SELECTOR, 'input[placeholder*="账号"]'),
-                (By.XPATH, '//input[@name="login-field"]'),
-            ]
-            
-            password_selectors = [
-                (By.NAME, 'login-password'),
-                (By.CSS_SELECTOR, 'input[name="login-password"]'),
-                (By.CSS_SELECTOR, 'input[type="password"]'),
-                (By.XPATH, '//input[@name="login-password"]'),
-            ]
+            time.sleep(2)
+        
+        username_selectors = [
+            (By.NAME, 'login-field'),
+            (By.CSS_SELECTOR, 'input[name="login-field"]'),
+            (By.CSS_SELECTOR, 'input[type="text"]'),
+            (By.CSS_SELECTOR, 'input[placeholder*="用户"]'),
+            (By.CSS_SELECTOR, 'input[placeholder*="账号"]'),
+            (By.XPATH, '//input[@name="login-field"]'),
+        ]
+        
+        password_selectors = [
+            (By.NAME, 'login-password'),
+            (By.CSS_SELECTOR, 'input[name="login-password"]'),
+            (By.CSS_SELECTOR, 'input[type="password"]'),
+            (By.XPATH, '//input[@name="login-password"]'),
+        ]
+        
+        username = None
+        password = None
         
         for by, selector in username_selectors:
             try:
@@ -939,7 +946,7 @@ if __name__ == "__main__":
     logger.info("\n所有账户处理完成，生成统一通知...")
     
     success_count = sum(1 for r in results if r[0])
-    total_count = len(results)
+    total_count = len(accounts)
     
     if success_count == total_count:
         notification_title = f"✅ 雨云自动签到完成 - 全部成功"

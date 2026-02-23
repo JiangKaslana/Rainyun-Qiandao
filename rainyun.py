@@ -610,7 +610,7 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
             wait = WebDriverWait(driver, timeout)
             
             time.sleep(2)
-        
+            
             try:
                 page_source = driver.page_source
                 logger.info(f"页面源码长度: {len(page_source)}")
@@ -705,7 +705,7 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
         
         for click_retry in range(3):
             try:
-                login_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//button[contains(text(), "登录") or contains(text(), "登 录")]')))
+                login_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//form//button[contains(text(), "登录") and not(contains(@class, "social")) and not(contains(@href, "oauth"))]')))
                 driver.execute_script("arguments[0].click();", login_button)
                 break
             except Exception as e:

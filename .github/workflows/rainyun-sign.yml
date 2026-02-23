@@ -142,3 +142,13 @@ jobs:
       - name: 清理临时文件
         run: rm -rf temp
         if: always()  # 即使前面步骤失败也执行清理
+
+  keepalive:
+    name: Keepalive Workflow
+    if: ${{ always() }}
+    needs: sign-in
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: liskin/gh-workflow-keepalive@v1

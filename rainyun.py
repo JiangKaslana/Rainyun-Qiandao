@@ -141,7 +141,6 @@ def init_selenium(debug=False, headless=False, fingerprint=None):
     
     ops.add_argument('--disable-blink-features=AutomationControlled')
     ops.add_argument('--no-proxy-server')
-    ops.add_argument('--host-resolver-rules=MAP app.rainyun.com 160.202.237.20,MAP web.rainyun.com 160.202.237.20,MAP www.rainyun.com 160.202.237.20')
     
     ops.add_argument(f'--lang={fingerprint["language"]}')
     ops.add_argument(f'--user-agent={fingerprint["user_agent"]}')
@@ -285,34 +284,39 @@ def save_cookies(driver, user):
     try:
         cookie_file = get_cookie_file_path(user)
         cookies = driver.get_cookies()
-        with open(cookie_file, 'w') as f:
-            json.dump(cookies, f)
-        logger.info(f"Cookie已保存: {cookie_file}")
+        with open(cookie_file, 'w', encoding='utf-8') as f:
+            json.dump(cookies, f, ensure_ascii=False)
+        logger.info("Cookie已保存到本地")
         return True
     except Exception as e:
-        logger.error(f"保存Cookie失败: {e}")
+        logger.warning(f"保存Cookie失败: {e}")
         return False
 
 def load_cookies(driver, user):
     try:
         cookie_file = get_cookie_file_path(user)
         if not os.path.exists(cookie_file):
-            logger.info("未找到Cookie缓存")
+            logger.info("未找到本地Cookie，将使用账号密码登录")
             return False
         
-        with open(cookie_file, 'r') as f:
+        with open(cookie_file, 'r', encoding='utf-8') as f:
             cookies = json.load(f)
         
+        driver.get("https://app.rainyun.com/")
+        time.sleep(1)
+        
         for cookie in cookies:
+            if 'expiry' in cookie:
+                cookie['expiry'] = int(cookie['expiry'])
             try:
                 driver.add_cookie(cookie)
             except Exception:
                 pass
         
-        logger.info(f"Cookie已加载: {cookie_file}")
+        logger.info("已加载本地Cookie")
         return True
     except Exception as e:
-        logger.error(f"加载Cookie失败: {e}")
+        logger.warning(f"加载Cookie失败: {e}")
         return False
 
 def delete_cookie_cache(user):
@@ -548,269 +552,57 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
         except: pass
         
         logger.info("尝试使用Cookie缓存登录")
-        safe_get(driver, "https://app.rainyun.com")
-        if load_cookies(driver, user):
-            driver.refresh()
-            time.sleep(1)
-            if check_cookie_valid(driver):
-                logger.info("Cookie登录成功！")
-                logger.info("正在转到赚取积分页")
-                wait = WebDriverWait(driver, timeout)
-                try:
-                    safe_get(driver, "https://app.rainyun.com/account/reward/earn")
-                    wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-                    time.sleep(1)
-                    
-                    try:
-                        completed = driver.find_elements(By.XPATH, "//span[contains(text(),'每日签到')]/following::span[contains(text(),'已完成')][1]")
-                        if any(el.is_displayed() for el in completed):
-                            logger.info("‘每日签到’显示已完成，跳过当前账号")
-                            try:
-                                points_raw = driver.find_element(By.XPATH, '//*[@id="app"]/div[1]/div[3]/div[2]/div/div/div[2]/div[1]/div[1]/div/p/div/h3').get_attribute("textContent")
-                                current_points = int(''.join(re.findall(r'\d+', points_raw)))
-                            except:
-                                current_points = 0
-                            return True, user, current_points, None
-                    except Exception:
-                        pass
-                    
-                    strategies = [
-                        (By.XPATH, '//*[@id="app"]/div[1]/div[3]/div[2]/div/div/div[2]/div[2]/div/div/div/div[1]/div/div[1]/div/div[1]/div/span[2]/a'),
-                        (By.XPATH, '//a[contains(@href, "earn") and contains(text(), "赚取")]'),
-                        (By.CSS_SELECTOR, 'a[href*="earn"]')
-                    ]
-                    
-                    earn = None
-                    for by, selector in strategies:
-                        try:
-                            earn = wait.until(EC.element_to_be_clickable((by, selector)))
-                            break
-                        except: continue
-                    
-                    if earn:
-                        driver.execute_script("arguments[0].scrollIntoView(true);", earn)
-                        time.sleep(1)
-                        logger.info("点击赚取积分")
-                        driver.execute_script("arguments[0].click();", earn)
-                        
-                        try:
-                            WebDriverWait(driver, 15, poll_frequency=0.25).until(
-                                EC.visibility_of_element_located((By.ID, "tcaptcha_iframe_dy"))
-                            )
-                            wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "tcaptcha_iframe_dy")))
-                            logger.info("处理验证码")
-                            process_captcha()
-                            driver.switch_to.default_content()
-                        except TimeoutException:
-                            logger.info("未触发验证码，继续")
-                            driver.switch_to.default_content()
-                        
-                        logger.info("赚取积分操作完成")
-                    else:
-                        driver.refresh()
-                        time.sleep(1)
-                except Exception as e:
-                    logger.error(f"Cookie登录后操作出错: {e}")
-                    pass
+        load_cookies(driver, user)
+        logger.info("正在跳转积分页...")
+        driver.get("https://app.rainyun.com/account/reward/earn")
+        time.sleep(3)
         
-        if not check_cookie_valid(driver):
-            logger.info("Cookie已失效，尝试重新登录")
-            
-            logger.info("发起登录请求")
-            safe_get(driver, "https://app.rainyun.com/auth/login")
-            wait = WebDriverWait(driver, timeout)
-            
-            time.sleep(2)
+        wait = WebDriverWait(driver, timeout)
+        
+        if "/auth/login" in driver.current_url:
+            logger.info("Cookie已失效，使用账号密码登录")
             
             try:
-                page_source = driver.page_source
-                logger.info(f"页面源码长度: {len(page_source)}")
-                current_url = driver.current_url
-                logger.info(f"当前URL: {current_url}")
-                
-                if "login" not in current_url.lower():
-                    logger.warning(f"URL异常，期望包含login，实际: {current_url}")
-            except Exception as e:
-                logger.warning(f"获取页面信息失败: {e}")
-            
-            logger.info("等待登录表单加载...")
-        else:
-            logger.info("Cookie登录成功！")
-            logger.info("正在转到赚取积分页")
-            wait = WebDriverWait(driver, timeout)
-            
-            time.sleep(2)
-        
-        username_selectors = [
-            (By.NAME, 'login-field'),
-            (By.CSS_SELECTOR, 'input[name="login-field"]'),
-            (By.CSS_SELECTOR, 'input[type="text"]'),
-            (By.CSS_SELECTOR, 'input[placeholder*="用户"]'),
-            (By.CSS_SELECTOR, 'input[placeholder*="账号"]'),
-            (By.XPATH, '//input[@name="login-field"]'),
-        ]
-        
-        password_selectors = [
-            (By.NAME, 'login-password'),
-            (By.CSS_SELECTOR, 'input[name="login-password"]'),
-            (By.CSS_SELECTOR, 'input[type="password"]'),
-            (By.XPATH, '//input[@name="login-password"]'),
-        ]
-        
-        username = None
-        password = None
-        
-        for by, selector in username_selectors:
-            try:
-                username = wait.until(EC.visibility_of_element_located((by, selector)))
-                logger.info(f"找到用户名输入框: {selector}")
-                break
-            except TimeoutException:
-                continue
-            except Exception as e:
-                logger.debug(f"选择器 {selector} 失败: {e}")
-                continue
-        
-        if username is None:
-            logger.error("无法找到用户名输入框")
-            try:
-                inputs = driver.find_elements(By.TAG_NAME, 'input')
-                logger.info(f"页面共有 {len(inputs)} 个input元素")
-                for i, inp in enumerate(inputs):
-                    try:
-                        inp_type = inp.get_attribute('type') or 'text'
-                        inp_name = inp.get_attribute('name') or ''
-                        inp_placeholder = inp.get_attribute('placeholder') or ''
-                        logger.info(f"  input[{i}]: type={inp_type}, name={inp_name}, placeholder={inp_placeholder}")
-                    except:
-                        pass
-            except Exception as e:
-                logger.error(f"获取input元素失败: {e}")
-            raise TimeoutException("无法找到用户名输入框")
-        
-        for by, selector in password_selectors:
-            try:
-                password = wait.until(EC.visibility_of_element_located((by, selector)))
-                logger.info(f"找到密码输入框: {selector}")
-                break
-            except TimeoutException:
-                continue
-            except Exception as e:
-                logger.debug(f"选择器 {selector} 失败: {e}")
-                continue
-        
-        if password is None:
-            raise TimeoutException("无法找到密码输入框")
-        
-        try:
-            login_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="app"]/div[1]/div[1]/div/div[2]/fade/div/div/span/form/button')))
-        except:
-            try:
-                login_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[type="submit"]')))
-            except:
-                login_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//button[contains(text(), "登录") or contains(text(), "登 录")]')))
-            
-        username.clear()
-        password.clear()
-        logger.info("输入用户名...")
-        username.send_keys(user)
-        time.sleep(0.5)
-        logger.info("输入密码...")
-        password.send_keys(pwd)
-        time.sleep(0.5)
-        logger.info("点击登录按钮...")
-        
-        for click_retry in range(2):
-            try:
-                login_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//button[contains(@class, "btn-primary") and (contains(., "登录") or contains(., "登 录"))]')))
+                username = wait.until(EC.visibility_of_element_located((By.NAME, 'login-field')))
+                password = wait.until(EC.visibility_of_element_located((By.NAME, 'login-password')))
+                login_button = wait.until(EC.element_to_be_clickable((By.XPATH, '//form//button[contains(text(), "登录") and not(contains(@class, "social")) and not(contains(@href, "oauth"))]')))
+                username.send_keys(user)
+                password.send_keys(pwd)
                 driver.execute_script("arguments[0].click();", login_button)
-                break
-            except Exception as e:
-                if click_retry < 2:
-                    logger.warning(f"登录按钮点击失败，重试 ({click_retry + 1}/2)")
-                    time.sleep(1)
-                else:
-                    raise TimeoutException("登录按钮点击失败")
-        
-        # 登录验证码
-        try:
-            wait.until(EC.visibility_of_element_located((By.ID, 'tcaptcha_iframe_dy')))
-            logger.warning("触发验证码！")
-            driver.switch_to.frame("tcaptcha_iframe_dy")
-            process_captcha()
-            driver.switch_to.default_content()
-        except TimeoutException:
-            logger.info("未触发验证码")
-        except Exception as e:
-            logger.warning(f"验证码处理异常: {e}")
+            except TimeoutException:
+                logger.error("页面加载超时")
+                return False, user, 0, "登录超时"
+            
+            time.sleep(5)
+            
             try:
+                wait.until(EC.visibility_of_element_located((By.ID, 'tcaptcha_iframe_dy')))
+                logger.warning("触发验证码！")
+                driver.switch_to.frame("tcaptcha_iframe_dy")
+                process_captcha()
                 driver.switch_to.default_content()
-            except:
-                pass
-        
-        logger.info("等待登录结果...")
-        login_success = False
-        for i in range(20):
-            time.sleep(0.5)
-            try:
-                current_url = driver.current_url
-                logger.info(f"[{i+1}/20] 当前URL: {current_url}")
-                if "dashboard" in current_url or "reward" in current_url:
-                    login_success = True
-                    logger.info("检测到登录成功（URL包含dashboard/reward）")
-                    break
-                if "login" not in current_url:
-                    login_success = True
-                    logger.info("检测到登录成功（URL已离开登录页）")
-                    break
-            except Exception as e:
-                logger.warning(f"获取URL失败: {e}")
-        
-        if not login_success:
-            logger.error("登录超时，检查页面状态...")
-            try:
-                page_source = driver.page_source[:500]
-                logger.error(f"页面内容片段: {page_source}")
-                error_elements = driver.find_elements(By.CSS_SELECTOR, '[class*="error"], [class*="alert"], [class*="message"]')
-                for el in error_elements:
-                    if el.is_displayed() and el.text.strip():
-                        logger.error(f"发现错误信息: {el.text}")
-            except Exception as e:
-                logger.error(f"检查页面状态失败: {e}")
-            delete_cookie_cache(user)
-            return False, user, 0, "登录超时"
-        
-        logger.info("登录成功！")
-        save_cookies(driver, user)
-        logger.info("正在转到赚取积分页")
-        
-        try:
-            safe_get(driver, "https://app.rainyun.com/account/reward/earn")
-            wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-            time.sleep(1)
-            logger.info("赚取积分页面加载完成")
-        except Exception as e:
-            logger.error(f"跳转赚取积分页失败: {e}")
-            delete_cookie_cache(user)
-            return False, user, 0, f"跳转失败: {e}"
-
-        try:
-            claim_btns = driver.find_elements(By.XPATH, "//span[contains(text(),'每日签到')]/following::a[contains(@href,'/account/reward/earn')][1]")
-            if any(el.is_displayed() for el in claim_btns):
-                logger.info("检测到'每日签到'行的'领取奖励'，进入签到流程")
+            except TimeoutException:
+                logger.info("未触发验证码")
+                driver.switch_to.default_content()
+            
+            if "/dashboard" in driver.current_url or "/account" in driver.current_url:
+                logger.info("登录成功！")
+                save_cookies(driver, user)
+                driver.get("https://app.rainyun.com/account/reward/earn")
+                time.sleep(2)
             else:
-                completed = driver.find_elements(By.XPATH, "//span[contains(text(),'每日签到')]/following::span[contains(text(),'已完成')][1]")
-                if any(el.is_displayed() for el in completed):
-                    logger.info("'每日签到'显示已完成，跳过当前账号")
-                    try:
-                        points_raw = driver.find_element(By.XPATH, '//*[@id="app"]/div[1]/div[3]/div[2]/div/div/div[2]/div[1]/div[1]/div/p/div/h3').get_attribute("textContent")
-                        current_points = int(''.join(re.findall(r'\d+', points_raw)))
-                    except:
-                        current_points = 0
-                    return True, user, current_points, None
-        except Exception as e:
-            logger.warning(f"检查签到状态失败: {e}")
-
+                logger.error(f"登录失败，当前页面: {driver.current_url}")
+                return False, user, 0, "登录失败"
+        else:
+            logger.info("Cookie有效，免密登录成功！")
+        
+        if "/account/reward/earn" not in driver.current_url:
+            driver.get("https://app.rainyun.com/account/reward/earn")
+            time.sleep(2)
+        
+        dismiss_modal_confirm(driver, timeout)
+        dismiss_modal_confirm(driver, timeout)
+        
         strategies = [
             (By.XPATH, '//*[@id="app"]/div[1]/div[3]/div[2]/div/div/div[2]/div[2]/div/div/div/div[1]/div/div[1]/div/div[1]/div/span[2]/a'),
             (By.XPATH, '//a[contains(@href, "earn") and contains(text(), "赚取")]'),
@@ -821,18 +613,21 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
         for by, selector in strategies:
             try:
                 earn = wait.until(EC.element_to_be_clickable((by, selector)))
-                logger.info("找到赚取积分按钮")
                 break
-            except: 
-                continue
+            except: continue
         
-        if earn:
+        if not earn:
+            logger.error("找不到签到按钮")
+            return False, user, 0, "找不到签到按钮"
+        
+        btn_text = earn.text.strip()
+        logger.info(f"签到按钮文字: [{btn_text}]")
+        
+        if btn_text == "领取奖励":
             driver.execute_script("arguments[0].scrollIntoView(true);", earn)
             time.sleep(1)
-            logger.info("点击赚取积分")
+            logger.info("点击领取奖励")
             driver.execute_script("arguments[0].click();", earn)
-            
-            logger.info("等待验证码加载（如果有）...")
             
             try:
                 WebDriverWait(driver, 15, poll_frequency=0.25).until(
@@ -843,27 +638,17 @@ def sign_in_account(user, pwd, debug=False, headless=False, index=0):
                 process_captcha()
                 driver.switch_to.default_content()
             except TimeoutException:
-                logger.info("未触发验证码，继续")
-                driver.switch_to.default_content()
-            except Exception as e:
-                logger.error(f"验证码处理过程出错: {e}")
+                logger.info("未触发验证码")
                 driver.switch_to.default_content()
             
             logger.info("赚取积分操作完成")
-        else:
-            logger.warning("未找到赚取积分按钮，尝试刷新页面")
-            driver.refresh()
-            time.sleep(1)
         
-        driver.implicitly_wait(5)
         try:
             points_raw = driver.find_element(By.XPATH, '//*[@id="app"]/div[1]/div[3]/div[2]/div/div/div[2]/div[1]/div[1]/div/p/div/h3').get_attribute("textContent")
             current_points = int(''.join(re.findall(r'\d+', points_raw)))
-            logger.info(f"当前剩余积分: {current_points} | 约为 {current_points / 2000:.2f} 元")
         except:
             current_points = 0
         
-        logger.info("任务执行成功！")
         return True, user, current_points, None
 
     except Exception as e:

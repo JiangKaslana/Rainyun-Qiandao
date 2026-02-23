@@ -141,6 +141,7 @@ def init_selenium(debug=False, headless=False, fingerprint=None):
     
     ops.add_argument('--disable-blink-features=AutomationControlled')
     ops.add_argument('--no-proxy-server')
+    ops.add_argument('--host-resolver-rules=MAP app.rainyun.com 160.202.237.20,MAP web.rainyun.com 160.202.237.20,MAP www.rainyun.com 160.202.237.20')
     
     ops.add_argument(f'--lang={fingerprint["language"]}')
     ops.add_argument(f'--user-agent={fingerprint["user_agent"]}')

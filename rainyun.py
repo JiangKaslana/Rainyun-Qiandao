@@ -380,60 +380,12 @@ def load_cookies(driver, account_id):
         logger.warning(f"加载 Cookie 失败: {e}")
         return False
 
-def save_screenshot(driver, account_id, status="success"):
-    try:
-        screenshot_dir = os.path.abspath(os.path.join("temp", "screenshots"))
-        os.makedirs(screenshot_dir, exist_ok=True)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        masked_account = f"{account_id[:3]}xxx{account_id[-3:] if len(account_id) > 6 else account_id}"
-        
-        temp_filepath = os.path.join(screenshot_dir, f"temp_{timestamp}.png")
-        if not driver.save_screenshot(temp_filepath):
-            return None
-
-        if not os.path.exists(temp_filepath):
-            return None
-        
-        compressed_filename = f"{status}_{masked_account}_{timestamp}.jpg"
-        compressed_filepath = os.path.join(screenshot_dir, compressed_filename)
-        
-        compress_with_pillow(temp_filepath, compressed_filepath)
-        
-        try:
-            os.remove(temp_filepath)
-        except:
-            pass
-        
-        return compressed_filepath
-    except Exception as e:
-        logger.error(f"保存截图时出错: {e}")
-        return None
-
-def compress_with_pillow(input_path, output_path, max_width=1280, quality=40):
-    try:
-        from PIL import Image
-        
-        with Image.open(input_path) as img:
-            if img.mode in ('RGBA', 'P'):
-                img = img.convert('RGB')
-            
-            w, h = img.size
-            if w > max_width:
-                img = img.resize((max_width, int(h * max_width / w)), Image.Resampling.LANCZOS)
-            
-            img.save(output_path, 'JPEG', quality=quality, optimize=True)
-        
-        return os.path.getsize(output_path)
-    except Exception as e:
-        logger.debug(f"Pillow 压缩出错: {e}")
-        return None
-
-def process_captcha(driver, wait, ocr, det):
+def process_captcha(driver, wait):
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.webdriver.support.wait import WebDriverWait
     from selenium.common.exceptions import TimeoutException
+    import ICR
     
     try:
         wait.until(EC.presence_of_element_located((By.ID, "slideBg")))
@@ -441,71 +393,50 @@ def process_captcha(driver, wait, ocr, det):
         logger.info("未检测到可处理验证码内容，跳过验证码处理")
         return
 
-    import cv2
     download_captcha_img(driver, wait)
     
-    is_captcha_valid = check_captcha(ocr)
+    positions = ICR.find_part_positions("temp/captcha.jpg", "temp/sprite.jpg", 'template')
     
-    if is_captcha_valid:
-        logger.info("开始识别验证码")
-        captcha = cv2.imread("temp/captcha.jpg")
-        with open("temp/captcha.jpg", 'rb') as f:
-            captcha_b = f.read()
+    if positions:
+        logger.info(f"识别到 {len(positions)} 个图案位置")
         
-        bboxes = det.detection(captcha_b)
+        for i, (x, y) in enumerate(positions):
+            logger.info(f"图案 {i + 1} 位于 ({int(x)}, {int(y)})")
+            slideBg = wait.until(EC.visibility_of_element_located((By.XPATH, '//*[@id="slideBg"]')))
+            style = slideBg.get_attribute("style")
+            
+            import re
+            bg_width = float(re.search(r'width:\s*([\d.]+)px', style).group(1))
+            bg_height = float(re.search(r'height:\s*([\d.]+)px', style).group(1))
+            
+            import cv2
+            captcha = cv2.imread("temp/captcha.jpg")
+            raw_w, raw_h = captcha.shape[1], captcha.shape[0]
+            
+            final_x = int(x / raw_w * bg_width - bg_width / 2)
+            final_y = int(y / raw_h * bg_height - bg_height / 2)
+            
+            from selenium.webdriver import ActionChains
+            ActionChains(driver).move_to_element_with_offset(slideBg, final_x, final_y).click().perform()
         
-        result = dict()
-        for i in range(len(bboxes)):
-            x1, y1, x2, y2 = bboxes[i]
-            spec = captcha[y1:y2, x1:x2]
-            cv2.imwrite(f"temp/spec_{i + 1}.jpg", spec)
-            for j in range(3):
-                similarity, matched = compute_similarity(f"temp/sprite_{j + 1}.jpg", f"temp/spec_{i + 1}.jpg")
-                similarity_key = f"sprite_{j + 1}.similarity"
-                position_key = f"sprite_{j + 1}.position"
-                if similarity_key in result.keys():
-                    if float(result[similarity_key]) < similarity:
-                        result[similarity_key] = similarity
-                        result[position_key] = f"{int((x1 + x2) / 2)},{int((y1 + y2) / 2)}"
-                else:
-                    result[similarity_key] = similarity
-                    result[position_key] = f"{int((x1 + x2) / 2)},{int((y1 + y2) / 2)}"
-        
-        if check_answer(result):
-            for i in range(3):
-                similarity_key = f"sprite_{i + 1}.similarity"
-                position_key = f"sprite_{i + 1}.position"
-                positon = result[position_key]
-                logger.info(f"图案 {i + 1} 位于 ({positon})，匹配率：{result[similarity_key]}")
-                slideBg = wait.until(EC.visibility_of_element_located((By.XPATH, '//*[@id="slideBg"]')))
-                style = slideBg.get_attribute("style")
-                x, y = int(positon.split(",")[0]), int(positon.split(",")[1])
-                width_raw, height_raw = captcha.shape[1], captcha.shape[0]
-                width, height = float(get_width_from_style(style)), float(get_height_from_style(style))
-                x_offset, y_offset = float(-width / 2), float(-height / 2)
-                final_x, final_y = int(x_offset + x / width_raw * width), int(y_offset + y / height_raw * height)
-                from selenium.webdriver import ActionChains
-                ActionChains(driver).move_to_element_with_offset(slideBg, final_x, final_y).click().perform()
-            confirm = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tcStatus"]/div[2]/div[2]/div/div')))
-            logger.info("提交验证码")
-            confirm.click()
-            time.sleep(5)
-            result = wait.until(EC.visibility_of_element_located((By.XPATH, '//*[@id="tcOperation"]')))
-            if result.get_attribute("class") == 'tc-opera pointer show-success':
-                logger.info("验证码通过")
-                return
-            else:
-                logger.error("验证码未通过，正在重试")
+        confirm = wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="tcStatus"]/div[2]/div[2]/div/div')))
+        logger.info("提交验证码")
+        confirm.click()
+        time.sleep(5)
+        result = wait.until(EC.visibility_of_element_located((By.XPATH, '//*[@id="tcOperation"]')))
+        if result.get_attribute("class") == 'tc-opera pointer show-success':
+            logger.info("验证码通过")
+            return
         else:
-            logger.error("验证码识别失败，正在重试")
+            logger.error("验证码未通过，正在重试")
     else:
-        logger.error("当前验证码识别率低，尝试刷新")
+        logger.error("验证码识别失败，正在重试")
     
     reload = driver.find_element(By.XPATH, '//*[@id="reload"]')
     time.sleep(5)
     reload.click()
     time.sleep(5)
-    process_captcha(driver, wait, ocr, det)
+    process_captcha(driver, wait)
 
 def download_captcha_img(driver, wait):
     from selenium.webdriver.common.by import By
@@ -561,58 +492,6 @@ def get_url_from_style(style):
     import re
     return re.search(r'url\(["\']?(.*?)["\']?\)', style).group(1)
 
-def get_width_from_style(style):
-    import re
-    return re.search(r'width:\s*([\d.]+)px', style).group(1)
-
-def get_height_from_style(style):
-    import re
-    return re.search(r'height:\s*([\d.]+)px', style).group(1)
-
-def check_captcha(ocr) -> bool:
-    import cv2
-    
-    raw = cv2.imread("temp/sprite.jpg")
-    for i in range(3):
-        w = raw.shape[1]
-        temp = raw[:, w // 3 * i: w // 3 * (i + 1)]
-        cv2.imwrite(f"temp/sprite_{i + 1}.jpg", temp)
-        with open(f"temp/sprite_{i + 1}.jpg", mode="rb") as f:
-            temp_rb = f.read()
-        if ocr.classification(temp_rb) in ["0", "1"]:
-            return False
-    return True
-
-def check_answer(d: dict) -> bool:
-    flipped = dict()
-    for key in d.keys():
-        flipped[d[key]] = key
-    return len(d.values()) == len(flipped.keys())
-
-def compute_similarity(img1_path, img2_path):
-    import cv2
-    
-    img1 = cv2.imread(img1_path, cv2.IMREAD_GRAYSCALE)
-    img2 = cv2.imread(img2_path, cv2.IMREAD_GRAYSCALE)
-
-    sift = cv2.SIFT_create()
-    kp1, des1 = sift.detectAndCompute(img1, None)
-    kp2, des2 = sift.detectAndCompute(img2, None)
-
-    if des1 is None or des2 is None:
-        return 0.0, 0
-
-    bf = cv2.BFMatcher()
-    matches = bf.knnMatch(des1, des2, k=2)
-
-    good = [m for m_n in matches if len(m_n) == 2 for m, n in [m_n] if m.distance < 0.8 * n.distance]
-
-    if len(good) == 0:
-        return 0.0, 0
-
-    similarity = len(good) / len(matches)
-    return similarity, len(good)
-
 def run_checkin(account_user=None, account_pwd=None):
     modules = import_selenium_modules()
     webdriver = modules['webdriver']
@@ -626,8 +505,6 @@ def run_checkin(account_user=None, account_pwd=None):
     current_pwd = account_pwd or pwd
     driver = None
     retry_stats = {'count': 0}
-    ocr = None
-    det = None
 
     masked_user = f"{current_user[:3]}***{current_user[-3:] if len(current_user) > 6 else current_user}"
     
@@ -653,10 +530,6 @@ def run_checkin(account_user=None, account_pwd=None):
         
         wait = WebDriverWait(driver, timeout)
         
-        import ddddocr
-        ocr = ddddocr.DdddOcr(ocr=True, show_ad=False)
-        det = ddddocr.DdddOcr(det=True, show_ad=False)
-        
         load_cookies(driver, current_user)
         logger_adapter.info("正在跳转积分页...")
         driver.get("https://app.rainyun.com/account/reward/earn")
@@ -675,18 +548,17 @@ def run_checkin(account_user=None, account_pwd=None):
                 login_button.click()
             except TimeoutException:
                 logger_adapter.error("页面加载超时")
-                screenshot_path = save_screenshot(driver, current_user, status="failure")
                 return {
                     'status': False, 'msg': '页面加载超时', 'points': 0,
                     'username': masked_user,
-                    'retries': retry_stats['count'], 'screenshot': screenshot_path
+                    'retries': retry_stats['count']
                 }
             
             try:
                 login_captcha = wait.until(EC.visibility_of_element_located((By.ID, 'tcaptcha_iframe_dy')))
                 logger_adapter.warning("触发验证码！")
                 driver.switch_to.frame("tcaptcha_iframe_dy")
-                process_captcha(driver, wait, ocr, det)
+                process_captcha(driver, wait)
             except TimeoutException:
                 logger_adapter.info("未触发验证码")
             
@@ -701,11 +573,10 @@ def run_checkin(account_user=None, account_pwd=None):
                 time.sleep(2)
             else:
                 logger_adapter.error(f"登录失败，当前页面: {driver.current_url}")
-                screenshot_path = save_screenshot(driver, current_user, status="failure")
                 return {
                     'status': False, 'msg': '登录失败', 'points': 0,
                     'username': masked_user,
-                    'retries': retry_stats['count'], 'screenshot': screenshot_path
+                    'retries': retry_stats['count']
                 }
         else:
             logger_adapter.info("Cookie 有效，免密登录成功！")
@@ -732,7 +603,7 @@ def run_checkin(account_user=None, account_pwd=None):
                 try:
                     captcha_iframe = wait.until(EC.visibility_of_element_located((By.CSS_SELECTOR, "iframe[id^='tcaptcha_iframe']")))
                     driver.switch_to.frame(captcha_iframe)
-                    process_captcha(driver, wait, ocr, det)
+                    process_captcha(driver, wait)
                 finally:
                     driver.switch_to.default_content()
                 driver.implicitly_wait(5)
@@ -746,30 +617,24 @@ def run_checkin(account_user=None, account_pwd=None):
         current_points = int(''.join(re.findall(r'\d+', points_raw)))
         logger_adapter.info(f"当前剩余积分: {current_points} | 约为 {current_points / 2000:.2f} 元")
         logger_adapter.info("签到任务执行成功！")
-        screenshot_path = save_screenshot(driver, current_user, status="success")
         return {
             'status': True,
             'msg': '签到成功',
             'points': current_points,
             'username': masked_user,
-            'retries': retry_stats['count'],
-            'screenshot': screenshot_path
+            'retries': retry_stats['count']
         }
             
     except Exception as e:
         logger_adapter.error(f"签到任务执行失败: {e}")
         import traceback
         logger_adapter.error(f"详细错误信息: {traceback.format_exc()}")
-        screenshot_path = None
-        if driver is not None:
-            screenshot_path = save_screenshot(driver, current_user, status="failure")
         return {
             'status': False,
             'msg': f'执行异常: {str(e)[:50]}...',
             'points': 0,
             'username': masked_user,
-            'retries': retry_stats['count'],
-            'screenshot': screenshot_path
+            'retries': retry_stats['count']
         }
     finally:
         if driver is not None:
@@ -814,8 +679,11 @@ def run_checkin(account_user=None, account_pwd=None):
             pass
 
 def parse_accounts():
-    usernames = os.getenv("RAINYUN_USERNAME", "").split("|")
-    passwords = os.getenv("RAINYUN_PASSWORD", "").split("|")
+    usernames_raw = os.getenv("RAINYUN_USER", "").replace("\r\n", "\n").replace("\r", "\n")
+    passwords_raw = os.getenv("RAINYUN_PASS", "").replace("\r\n", "\n").replace("\r", "\n")
+    
+    usernames = [u for u in usernames_raw.split("\n") if u.strip()]
+    passwords = [p for p in passwords_raw.split("\n") if p.strip()]
     
     if len(usernames) != len(passwords):
         logger.warning("用户名和密码数量不匹配，只使用匹配的部分")
@@ -826,8 +694,8 @@ def parse_accounts():
     accounts = [(u.strip(), p.strip()) for u, p in zip(usernames, passwords) if u.strip() and p.strip()]
     
     if not accounts:
-        single_user = os.getenv("RAINYUN_USERNAME", "username")
-        single_pwd = os.getenv("RAINYUN_PASSWORD", "password")
+        single_user = os.getenv("RAINYUN_USER", "username")
+        single_pwd = os.getenv("RAINYUN_PASS", "password")
         accounts = [(single_user, single_pwd)]
     
     logger.info(f"检测到 {len(accounts)} 个账号")
@@ -954,13 +822,13 @@ if __name__ == "__main__":
     debug = os.getenv("DEBUG", "false").lower() == "true"
     linux = os.getenv("LINUX_MODE", "true").lower() == "true" or os.path.exists("/.dockerenv")
     
-    user = os.getenv("RAINYUN_USERNAME", "username").split("|")[0]
-    pwd = os.getenv("RAINYUN_PASSWORD", "password").split("|")[0]
+    user = os.getenv("RAINYUN_USER", "username").split("|")[0]
+    pwd = os.getenv("RAINYUN_PASS", "password").split("|")[0]
     
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
 
-    ver = "2.6 (ICR + e-main)"
+    ver = "2.6 (ICR + Cookie)"
     logger.info("------------------------------------------------------------------")
     logger.info(f"雨云自动签到工作流 v{ver}")
     logger.info("------------------------------------------------------------------")
